@@ -6,7 +6,11 @@ The intended experience is to design a defense, leave it running, return to usef
 
 ## Current status
 
-Brainstorming only. No implementation or technical stack has been committed yet.
+A playable, browser-only prototype is implemented. The core loop covers tower placement, three combat waves, browser-local persistence, deterministic elapsed-time catch-up, and an explicit Return Report.
+
+The current production stack is **Vite + React + TypeScript + Tailwind + Canvas 2D**. React owns the app shell; the deterministic Canvas runtime remains isolated under `game/src/game/` so UI changes cannot contaminate the simulation.
+
+Build from `game/` with `npm run build`; deploy the generated `game/dist/` directory to a static host.
 
 ## Design documents
 

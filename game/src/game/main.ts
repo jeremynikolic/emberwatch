@@ -13,10 +13,17 @@ import { type Projectile, type Burst } from './combat.js';
 import { advance, type AdvanceOutcome } from './runtime.js';
 import { clearRun, loadRun, saveRun } from './persistence.js';
 
-const canvas = document.getElementById('game') as HTMLCanvasElement;
+export interface MountedGame {
+  dispose(): void;
+}
+
+/** Mount the deterministic Canvas runtime into a host-owned canvas element. */
+export function mountGame(canvas: HTMLCanvasElement, onError: (error: unknown) => void = console.error): MountedGame {
 const c = canvas.getContext('2d')!;
 c.imageSmoothingEnabled = false;
-c.scale(SCALE, SCALE);
+// React development mode mounts, cleans up, then mounts once more. Resetting the
+// transform avoids compounding the 2× pixel scale across those mounts.
+c.setTransform(SCALE, 0, 0, SCALE, 0, 0);
 
 const WORLD_X = 0, WORLD_Y = 24, WORLD_W = 504, WORLD_H = 288; // 288 = 360 − top 24 − build bar 48; 18 tile rows
 // 504 px is not tile-aligned (504/16 = 31.5); the playable world is 31 columns.
@@ -72,8 +79,8 @@ const bursts: Burst[] = [];
 let assets: Assets;
 let returnReport: AdvanceOutcome | null = null;
 // Test/debug hooks: expose state snapshots without leaking module internals into gameplay.
-Object.defineProperty(window, '__sim', { get: () => sim });
-Object.defineProperty(window, '__debug', { get: () => ({
+Object.defineProperty(window, '__sim', { configurable: true, get: () => sim });
+Object.defineProperty(window, '__debug', { configurable: true, get: () => ({
   returnReport,
   projectiles: projectiles.length,
   towerCooldowns: sim.towers.map(t => ({ kind: t.kind, cooldown: t.cooldownLeft })),
@@ -268,7 +275,7 @@ function draw(): void {
 }
 
 // ---- Input -----------------------------------------------------------------
-canvas.addEventListener('click', (e: MouseEvent) => {
+const onClick = (e: MouseEvent): void => {
   const r = canvas.getBoundingClientRect();
   const x = (e.clientX - r.left) * CANVAS_W / r.width;
   const y = (e.clientY - r.top) * CANVAS_H / r.height;
@@ -296,25 +303,28 @@ canvas.addEventListener('click', (e: MouseEvent) => {
       if (place(sim, selectedBuild, gx, gy)) { selectedBuild = null; saveRun(sim); }
     }
   }
-});
+};
 
-canvas.addEventListener('mousemove', (e: MouseEvent) => {
+const onMouseMove = (e: MouseEvent): void => {
   const r = canvas.getBoundingClientRect();
   const x = (e.clientX - r.left) * CANVAS_W / r.width;
   const y = (e.clientY - r.top) * CANVAS_H / r.height;
   hover = toWorld(x, y);
-});
+};
 
 // ---- Loop ------------------------------------------------------------------
 let last = performance.now();
 let lastSave = last;
+let animationFrame = 0;
+let disposed = false;
 function loop(now: number): void {
+  if (disposed) return;
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   advance(sim, dt, projectiles, bursts);
   if (now - lastSave >= 1000) { saveRun(sim); lastSave = now; }
   draw();
-  requestAnimationFrame(loop);
+  animationFrame = requestAnimationFrame(loop);
 }
 
 function restoreRun(): void {
@@ -328,16 +338,33 @@ function restoreRun(): void {
   saveRun(sim);
 }
 
-// Persist on lifecycle boundaries; a reload/reopen restores against elapsed wall time.
-window.addEventListener('pagehide', () => saveRun(sim));
-document.addEventListener('visibilitychange', () => {
+const onPageHide = (): void => saveRun(sim);
+const onVisibilityChange = (): void => {
   if (document.visibilityState === 'hidden') saveRun(sim);
-});
+};
+
+canvas.addEventListener('click', onClick);
+canvas.addEventListener('mousemove', onMouseMove);
+window.addEventListener('pagehide', onPageHide);
+document.addEventListener('visibilitychange', onVisibilityChange);
 
 loadAssets().then(a => {
+  if (disposed) return;
   assets = a;
   restoreRun();
-  requestAnimationFrame(loop);
-}).catch(err => {
-  document.querySelector('.hint')!.textContent = `ASSET ERROR: ${String(err)}`;
-});
+  animationFrame = requestAnimationFrame(loop);
+}).catch(onError);
+
+return {
+  dispose(): void {
+    disposed = true;
+    cancelAnimationFrame(animationFrame);
+    canvas.removeEventListener('click', onClick);
+    canvas.removeEventListener('mousemove', onMouseMove);
+    window.removeEventListener('pagehide', onPageHide);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    delete (window as unknown as Record<string, unknown>).__sim;
+    delete (window as unknown as Record<string, unknown>).__debug;
+  },
+};
+}
