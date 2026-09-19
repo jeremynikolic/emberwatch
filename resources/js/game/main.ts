@@ -315,6 +315,7 @@ const onPointerUp = (e: PointerEvent): void => {
 };
 
 const onPointerMove = (e: PointerEvent): void => {
+  // Touch has no persistent cursor; selecting and placing happens on pointerup.
   if (e.pointerType === 'touch') return;
   const { x, y } = pointFromClient(e.clientX, e.clientY);
   hover = toWorld(x, y);
