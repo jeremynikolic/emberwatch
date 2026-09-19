@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Emberwatch — Style Lock</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #080d17; overflow: hidden; }
+  body { display: grid; place-items: center; font-family: ui-monospace, "Cascadia Mono", monospace; }
+  #frame {
+    position: relative;
+    width: min(100vw, 1280px);
+    aspect-ratio: 16 / 9;
+    border: 4px solid #121b2b;
+    box-shadow: 0 0 0 2px #825f32, 0 24px 80px #000b;
+    background: #0c1422;
+  }
+  canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+  .hint {
+    position: absolute; right: 1.3%; bottom: 1.5%; pointer-events: none;
+    color: #8997a6; font-size: clamp(8px, .7vw, 12px); letter-spacing: .08em;
+  }
+</style>
+</head>
+<body>
+<div id="frame">
+  <canvas id="game" width="1280" height="720" aria-label="Emberwatch visual direction mock"></canvas>
+  <div class="hint">CLICK DAY/NIGHT OR GRID</div>
+</div>
+<script>
+const canvas = document.getElementById('game');
+const c = canvas.getContext('2d');
+c.imageSmoothingEnabled = false;
+// 2x backing resolution: every logical pixel covers 2x2 device pixels.
+// Sprites authored at 2x source draw 1:1 at the logical scale.
+c.scale(2, 2);
+
+const P = {
+  void:'#080d17', navy:'#0d1727', navy2:'#14233a', panel:'#101c2e', panel2:'#192a40',
+  brass:'#b78845', brassHi:'#e0b865', copper:'#a75d39', steel:'#71808b', steelHi:'#a7b3b8',
+  ink:'#18231f', grass:'#425745', grass2:'#50654c', moss:'#6a7651', earth:'#66533d', path:'#776b56',
+  pathHi:'#93846a', stone:'#53616a', stoneDark:'#303b43', timber:'#76503a', timberHi:'#a06b45',
+  ember:'#ee7e32', flame:'#ffd275', ice:'#73c9cf', iceHi:'#c0f4e9', crimson:'#a62f3e', crimsonHi:'#e05758',
+  fog:'#8aa0ae', root:'#322d27', bark:'#4b382d', barkHi:'#70503a', text:'#d3d9d7', muted:'#83919a',
+  good:'#78ad72', warn:'#e6a24c'
+};
+const ui = { night:false, grid:true };
+const buttons = [];
+const T = 16, worldTop = 26, worldW = 504, bottom = 312;
+const assets = {};
+const assetSources = {
+  watchfire: 'assets/watchfire-2x.png',
+  boltThrower: 'assets/bolt-thrower-2x.png',
+  frostCondenser: 'assets/frost-condenser-2x.png',
+  bombard: 'assets/bombard-2x.png',
+  rootCrawler: 'assets/root-crawler-2x.png'
+};
+
+function rect(x,y,w,h,color){ c.fillStyle=color; c.fillRect(x|0,y|0,w|0,h|0); }
+function line(x1,y1,x2,y2,color,w=1){ c.strokeStyle=color; c.lineWidth=w; c.beginPath(); c.moveTo(x1+.5,y1+.5); c.lineTo(x2+.5,y2+.5); c.stroke(); }
+function text(s,x,y,color=P.text,size=7,align='left'){ c.fillStyle=color; c.font=`bold ${size}px ui-monospace, monospace`; c.textAlign=align; c.textBaseline='top'; c.fillText(s,x,y); }
+function bevel(x,y,w,h,fill=P.panel){ rect(x,y,w,h,P.brass); rect(x+1,y+1,w-2,h-2,P.navy2); rect(x+2,y+2,w-4,h-4,fill); }
+function pxGlow(x,y,color){ rect(x-9,y-5,18,10,color+'22'); rect(x-6,y-4,12,8,color+'33'); }
+
+function terrain(){
+  rect(0,worldTop,worldW,bottom-worldTop,P.grass);
+  for(let y=worldTop; y<bottom; y+=T){
+    for(let x=0; x<worldW; x+=T){
+      const n=((x/T)*17+(y/T)*29)%11;
+      if(n===0) rect(x+3,y+4,2,1,P.grass2);
+      if(n===4) rect(x+11,y+12,2,1,P.moss);
+      if(n===7) rect(x+7,y+7,1,2,P.earth);
+    }
+  }
+  // Northern fog shelf and distant Citadel spire.
+  rect(0,worldTop,worldW,23,'#334959');
+  rect(0,worldTop+18,worldW,7,'#607581');
+  rect(0,worldTop+24,worldW,4,'#83949c');
+  rect(298,worldTop+3,5,21,'#151a20'); rect(296,worldTop+9,9,15,'#1b2025');
+  rect(299,worldTop-1,3,8,'#151a20'); rect(297,worldTop+15,7,3,'#0e1217');
+  rect(300,worldTop+4,2,2,P.crimsonHi); rect(295,worldTop+22,11,2,'#8497a0');
+  // Cold stream / non-buildable edge.
+  for(let x=16;x<176;x+=T){ rect(x,worldTop+232,T,T,'#355867'); rect(x,worldTop+232, T,2,'#6f9297'); }
+  rect(160,worldTop+216,T,T,'#355867'); rect(160,worldTop+216,T,2,'#6f9297');
+  // Maze path.
+  const cells=[];
+  for(let x=0;x<=10;x++) cells.push([x,4]);
+  for(let y=5;y<=9;y++) cells.push([10,y]);
+  for(let x=11;x<=18;x++) cells.push([x,9]);
+  for(let y=8;y>=6;y--) cells.push([18,y]);
+  for(let x=19;x<=27;x++) cells.push([x,6]);
+  for(let y=7;y<=13;y++) cells.push([27,y]);
+  for(let x=26;x>=24;x--) cells.push([x,13]);
+  for(const [gx,gy] of cells){
+    const x=gx*T,y=worldTop+gy*T; rect(x,y,T,T,P.path); rect(x,y,T,2,P.pathHi);
+    if((gx+gy)%3===0) rect(x+5,y+8,5,1,P.earth);
+  }
+  // Rocks and trees define blocked terrain.
+  drawRock(65,64); drawRock(145,88); drawRock(354,85); drawRock(436,204);
+  drawPine(30,206); drawPine(57,224); drawPine(214,52); drawPine(236,58); drawPine(452,70); drawPine(474,78);
+  if(ui.grid){
+    for(let x=0;x<=worldW;x+=T) line(x,worldTop,x,bottom,'#354b3e',1);
+    for(let y=worldTop;y<=bottom;y+=T) line(0,y,worldW,y,'#354b3e',1);
+  }
+}
+function drawRock(x,y){ rect(x,y+6,14,7,P.stoneDark); rect(x+2,y+2,10,9,P.stone); rect(x+4,y,6,3,P.steel); }
+function drawPine(x,y){ rect(x+7,y+16,3,8,P.timber); rect(x+2,y+9,13,9,'#263d35'); rect(x+4,y+4,9,9,'#30493c'); rect(x+6,y,5,7,'#3d5943'); }
+function platform(x,y,w=32,h=32){ rect(x,y+h-5,w,5,P.stoneDark); rect(x+1,y+h-7,w-2,3,P.stone); rect(x+2,y+3,w-4,h-10,'#5b4b39'); }
+function watchfire(x,y){ c.drawImage(assets.watchfire,x,y,48,48); text('WATCHFIRE',x+24,y+49,P.flame,6,'center'); }
+function bolt(x,y){ c.drawImage(assets.boltThrower,x,y,32,32); }
+function frost(x,y){ c.drawImage(assets.frostCondenser,x,y,32,32); }
+function bombard(x,y){ c.drawImage(assets.bombard,x,y,32,32); }
+function worker(x,y,tool='hammer'){ rect(x+3,y,4,4,P.flame); rect(x+2,y+4,6,6,P.navy2); rect(x+3,y+10,2,4,P.timber); rect(x+6,y+10,2,4,P.timber); if(tool==='hammer'){ rect(x+8,y+4,1,7,P.steelHi); rect(x+7,y+3,4,2,P.steel); } else { rect(x,y+5,3,2,P.brass); } }
+function crawler(x,y,frozen=false,flip=false){
+  c.drawImage(assets.rootCrawler,x,y,32,32);
+  if(frozen){ rect(x+3,y+4,3,6,P.iceHi); rect(x+1,y+8,7,2,P.ice); rect(x+23,y+2,3,7,P.iceHi); rect(x+25,y+8,5,2,P.ice); }
+}
+function brute(x,y){
+  rect(x+5,y+5,16,16,P.bark); rect(x+8,y+2,10,7,P.barkHi); rect(x+10,y,3,5,P.stoneDark); rect(x+16,y+1,3,5,P.stoneDark);
+  rect(x,y+7,7,6,P.root); rect(x+20,y+7,7,6,P.root); rect(x+1,y+12,4,6,P.root); rect(x+22,y+12,4,6,P.root);
+  rect(x+7,y+20,5,5,P.root); rect(x+16,y+20,5,5,P.root); rect(x+10,y+8,2,2,P.crimsonHi); rect(x+16,y+8,2,2,P.crimsonHi);
+  rect(x+3,y+3,2,6,'#33432d'); rect(x+23,y+2,2,7,'#33432d');
+}
+function thornSwarm(x,y){ for(let i=0;i<3;i++){ const xx=x+i*6, yy=y+(i%2)*3; rect(xx+1,yy+3,5,5,'#3b4a31'); rect(xx+3,yy,1,4,P.barkHi); rect(xx,yy+2,2,1,P.crimson); } }
+function rangeRing(x,y,r,color){ c.strokeStyle=color; c.lineWidth=1; c.setLineDash([2,2]); c.beginPath(); c.arc(x,y,r,0,Math.PI*2); c.stroke(); c.setLineDash([]); }
+function nightLayer(){
+  if(!ui.night) return;
+  rect(0,worldTop,worldW,bottom-worldTop,'#08152b78');
+  // blocky light pools
+  rect(339,251,64,45,'#ee7e3218'); rect(347,245,48,54,'#ee7e3224'); rect(357,250,30,36,'#ffd27522');
+  rect(338,264,3,3,P.flame); rect(372,273,2,2,P.ember);
+}
+function world(){
+  terrain();
+  // towers and range geometry
+  rangeRing(142,151,53,'#d7ba6855'); bolt(126,135); worker(119,157,'crank');
+  rangeRing(238,215,48,'#73c9cf55'); frost(222,199); worker(251,221,'hammer');
+  rangeRing(374,151,58,'#b7884555'); bombard(358,135); worker(350,160,'crank');
+  // enemies on route
+  crawler(58,worldTop+4*T+1,false); thornSwarm(143,worldTop+4*T+4); crawler(169,worldTop+7*T+1,true); brute(277,worldTop+8*T);
+  // endpoint/base
+  watchfire(352,worldTop+12*T-1);
+  // route arrowheads
+  text('»',96,worldTop+4*T+4,P.pathHi,10); text('▼',166,worldTop+6*T+4,P.pathHi,7); text('»',258,worldTop+9*T+4,P.pathHi,10); text('▼',433,worldTop+10*T+4,P.pathHi,7);
+  nightLayer();
+  // re-light essentials at night
+  if(ui.night){ rect(371,worldTop+12*T+12,5,8,P.flame); rect(373,worldTop+12*T+9,2,6,'#fff0a8'); }
+}
+function iconBox(x,y,label,kind,active=false){
+  bevel(x,y,38,32,active?'#263a4b':P.panel); text(label,x+19,y+23,active?P.flame:P.muted,5,'center');
+  const image = kind==='bolt' ? assets.boltThrower : kind==='frost' ? assets.frostCondenser : assets.bombard;
+  c.drawImage(image,x+9,y+1,20,20);
+}
+function uiChrome(){
+  // top status
+  rect(0,0,640,worldTop,P.navy); rect(0,24,640,2,P.brass); text('EMBERWATCH',10,6,P.flame,10);
+  const stats=[['WOOD','184',P.timberHi],['STONE','96',P.steelHi],['GOLD','28',P.brassHi],['PEOPLE','8/12',P.text],['EMBER','73%',P.ember]];
+  let sx=115; for(const [k,v,col] of stats){ text(k,sx,5,P.muted,5); text(v,sx,12,col,8); sx+=58; }
+  text('SPRING · WEEK 04',494,6,P.text,7); text(ui.night?'02:00':'16:00',608,7,ui.night?P.iceHi:P.flame,7,'right');
+  // right inspector
+  rect(worldW,worldTop,136,334,P.navy); rect(worldW,worldTop,2,334,P.brass);
+  text('SELECTED',516,36,P.muted,6); text('BOMBARD',516,45,P.text,10);
+  bevel(516,61,112,52,P.panel); bombard(522,70); text('LV 1',616,69,P.brassHi,6,'right'); text('STAFFED',616,81,P.good,6,'right');
+  text('DMG',520,120,P.muted,5); text('42',613,118,P.text,8,'right');
+  text('RELOAD',520,132,P.muted,5); text('6.0s',613,130,P.text,8,'right');
+  text('SPLASH',520,144,P.muted,5); text('2 tiles',613,142,P.text,8,'right');
+  text('FIRING TIMELINE',516,160,P.muted,6); rect(516,171,104,8,P.panel2); rect(517,172,68,6,P.brass); rect(585,172,17,6,P.ember); rect(602,172,17,6,P.stoneDark);
+  text('WORKERS',516,188,P.muted,6); bevel(516,199,28,22,P.panel2); worker(524,203,'crank'); text('1 / 1',552,205,P.text,7);
+  text('UPTIME  91%',516,231,P.good,6); text('NEXT SHOT  1.2s',516,243,P.flame,6);
+  // toggles
+  button(516,269,50,17,ui.night?'DAY':'NIGHT','night'); button(571,269,49,17,ui.grid?'GRID ✓':'GRID','grid');
+  text('THREAT',516,296,P.muted,6); text('ROOT SURGE',516,306,P.crimsonHi,8); text('00:47',618,306,P.warn,8,'right');
+  text('LEAKS DRAIN EMBER',516,324,P.muted,5);
+  // bottom build bar
+  rect(0,bottom,worldW,48,P.navy); rect(0,bottom,worldW,2,P.brass);
+  text('BUILD',9,320,P.muted,6); iconBox(47,318,'BOLT','bolt'); iconBox(89,318,'FROST','frost'); iconBox(131,318,'BOMBARD','bomb',true);
+  text('PATH VALID',191,321,P.good,6); text('RESERVE 25 WOOD',191,333,P.muted,6); text('NEXT WAVE',365,321,P.muted,6); text('00:47',437,319,P.warn,9);
+}
+function button(x,y,w,h,label,id){ bevel(x,y,w,h,P.panel2); text(label,x+w/2,y+5,P.text,6,'center'); buttons.push({x,y,w,h,id}); }
+function draw(){ buttons.length=0; rect(0,0,640,360,P.void); world(); uiChrome(); }
+canvas.addEventListener('click',e=>{
+  const r=canvas.getBoundingClientRect(), x=(e.clientX-r.left)*640/r.width, y=(e.clientY-r.top)*360/r.height;
+  const b=buttons.find(b=>x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h);
+  if(!b) return; if(b.id==='night') ui.night=!ui.night; if(b.id==='grid') ui.grid=!ui.grid; draw();
+});
+async function boot(){
+  await Promise.all(Object.entries(assetSources).map(([name,src])=>new Promise((resolve,reject)=>{
+    const image = new Image();
+    image.onload=()=>{ assets[name]=image; resolve(); };
+    image.onerror=reject;
+    image.src=src;
+  })));
+  draw();
+  window.mockReady=true;
+}
+boot();
+</script>
+</body>
+</html>

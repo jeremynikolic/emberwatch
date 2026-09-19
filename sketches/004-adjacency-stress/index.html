@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Emberwatch — Adjacency Stress Test</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #080d17; overflow: hidden; }
+  body { display: grid; place-items: center; font-family: ui-monospace, "Cascadia Mono", monospace; }
+  #frame { position: relative; width: min(100vw, 1280px); aspect-ratio: 16 / 9; border: 4px solid #121b2b; box-shadow: 0 0 0 2px #825f32, 0 24px 80px #000b; background: #0c1422; }
+  canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+  .hint { position: absolute; right: 1.3%; bottom: 1.5%; pointer-events: none; color: #8997a6; font-size: clamp(8px, .7vw, 12px); letter-spacing: .08em; }
+</style>
+</head>
+<body>
+<div id="frame">
+  <canvas id="game" width="1280" height="720" aria-label="Emberwatch adjacency stress test"></canvas>
+  <div class="hint">WORST-CASE PACKING · DAY/NIGHT</div>
+</div>
+<script>
+const canvas = document.getElementById('game');
+const c = canvas.getContext('2d');
+c.imageSmoothingEnabled = false;
+c.scale(2, 2); // logical 640x360
+const P = {
+  void:'#080d17', navy:'#0d1727', navy2:'#14233a', panel:'#101c2e', panel2:'#192a40',
+  brass:'#b78845', brassHi:'#e0b865', grass:'#425745', grass2:'#50654c', grid:'#354b3e',
+  path:'#776b56', pathHi:'#93846a', stone:'#53616a', stoneDark:'#303b43', timber:'#76503a',
+  ember:'#ee7e32', flame:'#ffd275', ice:'#73c9cf', iceHi:'#c0f4e9',
+  text:'#d3d9d7', muted:'#83919a', good:'#78ad72', warn:'#e6a24c'
+};
+const T = 16;
+const assets = {};
+const assetSources = {
+  boltThrower: '../001-style-lock/assets/bolt-thrower-2x.png',
+  frostCondenser: '../001-style-lock/assets/frost-condenser-2x.png',
+  bombard: '../001-style-lock/assets/bombard-2x.png',
+  rootCrawler: '../001-style-lock/assets/root-crawler-2x.png',
+  watchfire: '../001-style-lock/assets/watchfire-2x.png'
+};
+let night = false;
+
+function rect(x,y,w,h,color){ c.fillStyle=color; c.fillRect(x|0,y|0,w|0,h|0); }
+function line(x1,y1,x2,y2,color,w=1){ c.strokeStyle=color; c.lineWidth=w; c.beginPath(); c.moveTo(x1+.5,y1+.5); c.lineTo(x2+.5,y2+.5); c.stroke(); }
+function text(s,x,y,color=P.text,size=7,align='left'){ c.fillStyle=color; c.font=`bold ${size}px ui-monospace, monospace`; c.textAlign=align; c.textBaseline='top'; c.fillText(s,x,y); }
+function bevel(x,y,w,h,fill=P.panel){ rect(x,y,w,h,P.brass); rect(x+1,y+1,w-2,h-2,P.navy2); rect(x+2,y+2,w-4,h-4,fill); }
+
+function terrain(){
+  rect(0,0,640,360,P.grass);
+  for(let y=0;y<360;y+=T) for(let x=0;x<640;x+=T){
+    const n=((x/T)*17+(y/T)*29)%11;
+    if(n===0) rect(x+3,y+4,2,1,P.grass2);
+    if(n===7) rect(x+7,y+7,1,2,'#66533d');
+  }
+  for(let x=0;x<=640;x+=T) line(x,0,x,360,P.grid,1);
+  for(let y=0;y<=360;y+=T) line(0,y,640,y,P.grid,1);
+}
+
+// Zone A: edge-to-edge cluster (every tower touching neighbours).
+function zoneA(x0,y0){
+  const cells=[[0,0],[2,0],[0,2],[2,2]]; // 2x2-tile towers packed in a 4x4 block
+  const kinds=['boltThrower','frostCondenser','bombard','boltThrower'];
+  kinds.forEach((k,i)=>{ const [gx,gy]=cells[i]; c.drawImage(assets[k], x0+gx*T, y0+gy*T, 32,32); });
+  c.drawImage(assets.bombard, x0+4*T, y0+T, 32,32); // direct east neighbour
+  c.drawImage(assets.frostCondenser, x0+4*T, y0+3*T, 32,32);
+}
+// Zone B: full wall — a continuous line of towers along the route.
+function zoneB(x0,y0){
+  for(let i=0;i<6;i++){
+    const k = i%3===0?'boltThrower':i%3===1?'frostCondenser':'bombard';
+    c.drawImage(assets[k], x0+i*2*T, y0, 32,32);
+  }
+}
+// Zone C: mixed with enemies crawling between packed towers.
+function zoneC(x0,y0){
+  c.drawImage(assets.watchfire, x0, y0, 48,48);
+  c.drawImage(assets.bombard, x0+3*T, y0, 32,32);
+  c.drawImage(assets.boltThrower, x0+3*T, y0+2*T, 32,32);
+  c.drawImage(assets.rootCrawler, x0+T, y0+3*T, 32,32);
+  c.drawImage(assets.rootCrawler, x0+2.5*T, y0+3.5*T, 32,32);
+  c.drawImage(assets.frostCondenser, x0+5*T, y0+2*T, 32,32);
+  c.drawImage(assets.rootCrawler, x0+4.5*T, y0+.2*T, 32,32);
+}
+function draw(){
+  rect(0,0,640,360,P.void);
+  rect(0,0,640,18,P.navy); rect(0,16,640,2,P.brass);
+  text('EMBERWATCH · ADJACENCY STRESS TEST',10,5,P.flame,9);
+  text('WORST-CASE PACKING',600,5,P.muted,7,'right');
+  terrain();
+  // Labels + zones
+  text('A · CLUSTER',20,26,P.text,7);
+  zoneA(20,36);
+  text('B · WALL LINE',20,140,P.text,7);
+  zoneB(20,150);
+  text('C · DENSE COMBAT',20,240,P.text,7);
+  zoneC(20,250);
+  // right column: zoomed crop of the cluster at 2x logical (4x device)
+  const zx=400, zy=40;
+  bevel(zx-6,zy-6,220,150,P.panel);
+  text('CLUSTER AT 2× ZOOM',zx,zy-2,P.muted,6);
+  c.save();
+  c.beginPath(); c.rect(zx,zy+8,200,120); c.clip();
+  // re-draw zone A contents scaled 2x into the crop window
+  c.scale(2,2);
+  zoneA(zx/2, (zy+8)/2);
+  c.restore();
+  text('silhouette + role readable?',zx,zy+134,P.muted,6);
+  // right column: packed wall zoom
+  const wx=400, wy=210;
+  bevel(wx-6,wy-6,220,150,P.panel);
+  text('WALL AT 2× ZOOM',wx,wy-2,P.muted,6);
+  c.save();
+  c.beginPath(); c.rect(wx,wy+8,200,120); c.clip();
+  c.scale(2,2);
+  zoneB(wx/2,(wy+8)/2);
+  c.restore();
+  text('does the line read as towers?',wx,wy+134,P.muted,6);
+  if(night){
+    rect(0,0,640,360,'#08152b78');
+    text('NIGHT',10,34,P.iceHi,8);
+  }
+  // toggle
+  bevel(560,330,70,20,P.panel2);
+  text(night?'DAY':'NIGHT',595,336,P.text,7,'center');
+  buttons.length=0; buttons.push({x:560,y:330,w:70,h:20,id:'night'});
+}
+const buttons=[];
+canvas.addEventListener('click',e=>{
+  const r=canvas.getBoundingClientRect(), x=(e.clientX-r.left)*640/r.width, y=(e.clientY-r.top)*360/r.height;
+  const b=buttons.find(b=>x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h);
+  if(b){ night=!night; draw(); }
+});
+async function boot(){
+  await Promise.all(Object.entries(assetSources).map(([name,src])=>new Promise((res,rej)=>{
+    const im=new Image(); im.onload=()=>{assets[name]=im;res();}; im.onerror=rej; im.src=src;
+  })));
+  draw(); window.mockReady=true;
+}
+boot();
+</script>
+</body>
+</html>
