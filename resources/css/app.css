@@ -1,1 +1,45 @@
 @import 'tailwindcss';
+
+.mobile-orientation-guard {
+    display: none;
+}
+
+@media (orientation: portrait) and (pointer: coarse) {
+    .mobile-orientation-guard {
+        display: flex;
+    }
+}
+
+@media (orientation: landscape) and (pointer: coarse) {
+    .mobile-game-page {
+        display: flex;
+        height: 100dvh;
+        overflow: hidden;
+        padding: 0;
+    }
+
+    .mobile-game-section {
+        width: 100%;
+    }
+
+    .mobile-game-header,
+    .mobile-game-caption {
+        display: none;
+    }
+
+    .mobile-game-frame {
+        display: flex;
+        height: 100dvh;
+        align-items: center;
+        justify-content: center;
+        border: 0;
+        box-shadow: none;
+    }
+
+    .mobile-game-canvas {
+        width: auto;
+        max-width: 100%;
+        height: 100dvh;
+        max-height: 100dvh;
+    }
+}

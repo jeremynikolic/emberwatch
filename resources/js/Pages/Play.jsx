@@ -98,9 +98,9 @@ export default function Play({ auth }) {
     return (
         <>
             <Head title="Emberwatch" />
-            <main className="min-h-screen bg-[#080d17] px-3 py-5 text-slate-100 sm:px-6 sm:py-8">
-                <section className="mx-auto max-w-7xl">
-                    <header className="mb-4 flex items-center justify-between border-b border-amber-400/35 pb-3 font-mono text-xs tracking-[0.18em] text-slate-400">
+            <main className="mobile-game-page min-h-screen bg-[#080d17] px-3 py-5 text-slate-100 sm:px-6 sm:py-8">
+                <section className="mobile-game-section mx-auto max-w-7xl">
+                    <header className="mobile-game-header mb-4 flex items-center justify-between border-b border-amber-400/35 pb-3 font-mono text-xs tracking-[0.18em] text-slate-400">
                         <span>EMBERWATCH</span>
                         <nav className="flex items-center gap-4">
                             {auth.user ? (
@@ -117,14 +117,14 @@ export default function Play({ auth }) {
                         </nav>
                     </header>
 
-                    <div className="overflow-hidden border-4 border-[#121b2b] bg-[#0c1422] shadow-[0_0_0_2px_#825f32,0_24px_80px_#000b]">
+                    <div className="mobile-game-frame overflow-hidden border-4 border-[#121b2b] bg-[#0c1422] shadow-[0_0_0_2px_#825f32,0_24px_80px_#000b]">
                         <canvas
                             ref={canvasRef}
                             id="game"
                             width="1280"
                             height="720"
                             aria-label="Emberwatch tower-defense game"
-                            className="mx-auto block max-h-[calc(100vh-9rem)] w-auto max-w-full [image-rendering:pixelated]"
+                            className="mobile-game-canvas mx-auto block max-h-[calc(100vh-9rem)] w-auto max-w-full touch-none select-none [image-rendering:pixelated]"
                         />
                     </div>
 
@@ -133,7 +133,7 @@ export default function Play({ auth }) {
                             {error}
                         </p>
                     ) : (
-                        <p className="mt-3 font-mono text-xs tracking-wide text-slate-500">
+                        <p className="mobile-game-caption mt-3 font-mono text-xs tracking-wide text-slate-500">
                             {auth.user
                                 ? 'This settlement saves to your Emberwatch account and this device.'
                                 : 'Play locally, or claim a settlement to keep it across devices.'}
@@ -141,6 +141,18 @@ export default function Play({ auth }) {
                     )}
                 </section>
             </main>
+            <aside
+                className="mobile-orientation-guard fixed inset-0 z-50 items-center justify-center bg-[#080d17] p-8 text-center text-slate-100"
+                aria-label="Landscape mode required"
+            >
+                <div className="max-w-xs border border-amber-400/35 bg-[#0c1422] p-7 shadow-[0_0_0_2px_#825f32]">
+                    <p className="font-mono text-4xl text-amber-300" aria-hidden="true">↻</p>
+                    <h1 className="mt-4 font-mono text-lg font-semibold tracking-[0.16em] text-amber-200">ROTATE TO PLAY</h1>
+                    <p className="mt-3 font-mono text-sm leading-6 text-slate-400">
+                        Emberwatch is built for a landscape battlefield. Turn your phone sideways to command the watchfire.
+                    </p>
+                </div>
+            </aside>
         </>
     );
 }

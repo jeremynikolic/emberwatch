@@ -3,6 +3,7 @@ import { CANVAS_W, CANVAS_H, SCALE, T, P } from './tokens.js';
 import { rect, text, panel, type Ctx } from './draw.js';
 import { type Board, drawBoard, drawGrid, type TileKind } from './terrain.js';
 import { button, hitTest, type Button } from './ui.js';
+import { clientToCanvasPoint } from './input.js';
 import { applyLighting } from './lighting.js';
 import { type Assets, loadAssets, type AssetKey } from './assets.js';
 import {
@@ -275,10 +276,11 @@ function draw(): void {
 }
 
 // ---- Input -----------------------------------------------------------------
-const onClick = (e: MouseEvent): void => {
-  const r = canvas.getBoundingClientRect();
-  const x = (e.clientX - r.left) * CANVAS_W / r.width;
-  const y = (e.clientY - r.top) * CANVAS_H / r.height;
+function pointFromClient(clientX: number, clientY: number): { x: number; y: number } {
+  return clientToCanvasPoint(canvas.getBoundingClientRect(), clientX, clientY, CANVAS_W, CANVAS_H);
+}
+
+function activateAt(x: number, y: number): void {
   const b = hitTest(buttons, x, y);
   if (b) {
     if (b.id === 'report:continue') { returnReport = null; saveRun(sim); return; }
@@ -292,7 +294,7 @@ const onClick = (e: MouseEvent): void => {
     if (b.id === 'grid') { gridOn = !gridOn; return; }
   }
   if (sim.phase === 'won' || sim.phase === 'lost') return;
-  // Map click: place selected tower, or start wave on the prompt.
+  // Map tap/click: place selected tower, or start wave on the prompt.
   if (x >= 400 && x < 504 && y > WORLD_Y + WORLD_H) {
     if (sim.phase === 'build') { startWave(sim); saveRun(sim); }
     return;
@@ -303,14 +305,22 @@ const onClick = (e: MouseEvent): void => {
       if (place(sim, selectedBuild, gx, gy)) { selectedBuild = null; saveRun(sim); }
     }
   }
+}
+
+const onPointerUp = (e: PointerEvent): void => {
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  e.preventDefault();
+  const { x, y } = pointFromClient(e.clientX, e.clientY);
+  activateAt(x, y);
 };
 
-const onMouseMove = (e: MouseEvent): void => {
-  const r = canvas.getBoundingClientRect();
-  const x = (e.clientX - r.left) * CANVAS_W / r.width;
-  const y = (e.clientY - r.top) * CANVAS_H / r.height;
+const onPointerMove = (e: PointerEvent): void => {
+  if (e.pointerType === 'touch') return;
+  const { x, y } = pointFromClient(e.clientX, e.clientY);
   hover = toWorld(x, y);
 };
+
+const onPointerLeave = (): void => { hover = null; };
 
 // ---- Loop ------------------------------------------------------------------
 let last = performance.now();
@@ -343,8 +353,9 @@ const onVisibilityChange = (): void => {
   if (document.visibilityState === 'hidden') saveRun(sim);
 };
 
-canvas.addEventListener('click', onClick);
-canvas.addEventListener('mousemove', onMouseMove);
+canvas.addEventListener('pointerup', onPointerUp);
+canvas.addEventListener('pointermove', onPointerMove);
+canvas.addEventListener('pointerleave', onPointerLeave);
 window.addEventListener('pagehide', onPageHide);
 document.addEventListener('visibilitychange', onVisibilityChange);
 
@@ -359,8 +370,9 @@ return {
   dispose(): void {
     disposed = true;
     cancelAnimationFrame(animationFrame);
-    canvas.removeEventListener('click', onClick);
-    canvas.removeEventListener('mousemove', onMouseMove);
+    canvas.removeEventListener('pointerup', onPointerUp);
+    canvas.removeEventListener('pointermove', onPointerMove);
+    canvas.removeEventListener('pointerleave', onPointerLeave);
     window.removeEventListener('pagehide', onPageHide);
     document.removeEventListener('visibilitychange', onVisibilityChange);
     delete (window as unknown as Record<string, unknown>).__sim;

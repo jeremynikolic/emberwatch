@@ -46,6 +46,10 @@ npm run dev
 
 Open `http://127.0.0.1:8000`. Anonymous play is stored in browser `localStorage`. Creating an account adds a per-user server snapshot so the settlement can be restored on another device.
 
+### Mobile play
+
+Emberwatch supports touch input in **landscape orientation**. On portrait touch devices, the game shows a rotation prompt instead of shrinking the 31-column board into unusable targets. Landscape Canvas interaction uses Pointer Events and disables browser pan/zoom gestures over the battlefield.
+
 > Current account sync stores a convenience snapshot, not an anti-cheat authority. The deterministic runtime still executes in the browser. Server-authoritative progression needs a future rules/action API rather than trusting raw client state.
 
 ## Verification
