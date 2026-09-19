@@ -6,10 +6,12 @@ import { button, hitTest, type Button } from './ui.js';
 import { applyLighting } from './lighting.js';
 import { type Assets, loadAssets, type AssetKey } from './assets.js';
 import {
-  type Sim, makeSim, step, place, startWave,
+  type Sim, makeSim, place, startWave,
   type TowerKind, TOWERS,
 } from './sim.js';
-import { combatStep, type Projectile, type Burst } from './combat.js';
+import { type Projectile, type Burst } from './combat.js';
+import { advance, type AdvanceOutcome } from './runtime.js';
+import { clearRun, loadRun, saveRun } from './persistence.js';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const c = canvas.getContext('2d')!;
@@ -54,20 +56,29 @@ function buildBoard(): Board {
   return board;
 }
 
+// Route coordinates are local to the clipped world; rendering translates once.
+// Keeping this separate from screen-space prevents tower targeting drift.
 const ROUTE = {
   waypoints: [
-    ...ROUTE_CELLS.slice(0, -1).map(([gx, gy]) => ({ x: gx * T + T / 2, y: WORLD_Y + gy * T + T / 2 })),
-    { x: WATCHFIRE_CELL[0] * T + T / 2, y: WORLD_Y + WATCHFIRE_CELL[1] * T + T / 2 },
+    ...ROUTE_CELLS.slice(0, -1).map(([gx, gy]) => ({ x: gx * T + T / 2, y: gy * T + T / 2 })),
+    { x: WATCHFIRE_CELL[0] * T + T / 2, y: WATCHFIRE_CELL[1] * T + T / 2 },
   ],
 };
 
 const BOARD = buildBoard();
-const sim: Sim = makeSim(ROUTE, 100);
+let sim: Sim = makeSim(ROUTE, 130);
 const projectiles: Projectile[] = [];
 const bursts: Burst[] = [];
 let assets: Assets;
-// Test/debug hook: exposes sim state without leaking internals into modules.
-(window as unknown as Record<string, unknown>).__sim = sim;
+let returnReport: AdvanceOutcome | null = null;
+// Test/debug hooks: expose state snapshots without leaking module internals into gameplay.
+Object.defineProperty(window, '__sim', { get: () => sim });
+Object.defineProperty(window, '__debug', { get: () => ({
+  returnReport,
+  projectiles: projectiles.length,
+  towerCooldowns: sim.towers.map(t => ({ kind: t.kind, cooldown: t.cooldownLeft })),
+  enemies: sim.enemies.map(e => ({ hp: e.hp, x: e.x, y: e.y, waypoint: e.waypoint })),
+}) });
 
 // ---- Input state ------------------------------------------------------------
 let selectedBuild: TowerKind | null = null;
@@ -90,6 +101,22 @@ function validBuildCell(gx: number, gy: number): boolean {
   const [wx, wy] = WATCHFIRE_CELL;
   if (Math.abs(gx - wx) < 4 && Math.abs(gy - wy) < 4) return false; // keep the core clear
   return !sim.occupied.has(`${gx},${gy}`) && !sim.occupied.has(`${gx + 1},${gy}`) && !sim.occupied.has(`${gx},${gy + 1}`) && !sim.occupied.has(`${gx + 1},${gy + 1}`);
+}
+
+function formatDuration(seconds: number): string {
+  const whole = Math.floor(seconds);
+  const minutes = Math.floor(whole / 60);
+  return minutes > 0 ? `${minutes}m ${whole % 60}s` : `${whole}s`;
+}
+
+function restartRun(): void {
+  sim = makeSim(ROUTE, 130);
+  projectiles.length = 0;
+  bursts.length = 0;
+  selectedBuild = null;
+  returnReport = null;
+  clearRun();
+  saveRun(sim);
 }
 
 // ---- Rendering ----------------------------------------------------------------
@@ -173,14 +200,30 @@ function drawUI(): void {
   button(c, gBtn, gridOn ? 'GRID ✓' : 'GRID');
   buttons.push(nBtn, gBtn);
 
-  // End-state overlays
-  if (sim.phase === 'won' || sim.phase === 'lost') {
+  // Return diagnostics are the idle-loop contract: outcomes, not an opaque timer.
+  if (returnReport) {
+    rect(c, 142, 126, 356, 104, P.navy2);
+    panel(c, 140, 124, 360, 108);
+    text(c, 'RETURN REPORT', 320, 140, P.flame, 11, 'center');
+    text(c, `${formatDuration(returnReport.seconds)} simulated · wave ${returnReport.waveFrom} → ${returnReport.waveTo}`, 320, 158, P.text, 7, 'center');
+    const outcome = returnReport.leaks > 0
+      ? `${returnReport.kills} crawlers stopped · ${returnReport.leaks} leak${returnReport.leaks === 1 ? '' : 's'} · Ember -${Math.round(returnReport.emberLost)}`
+      : `${returnReport.kills} crawlers stopped · Watchfire held`;
+    text(c, outcome, 320, 172, returnReport.leaks > 0 ? P.warn : P.good, 7, 'center');
+    if (returnReport.capped) text(c, 'Catch-up capped at 15m for this prototype.', 320, 184, P.muted, 5, 'center');
+    const continueButton: Button = { x: 268, y: 196, w: 104, h: 18, id: 'report:continue' };
+    button(c, continueButton, 'CONTINUE');
+    buttons.push(continueButton);
+  } else if (sim.phase === 'won' || sim.phase === 'lost') {
     rect(c, 152, 140, 336, 80, P.navy2);
     panel(c, 150, 138, 340, 84);
     text(c, sim.phase === 'won' ? 'SETTLEMENT HOLDS' : 'THE EMBER FADES', 320, 158, P.flame, 12, 'center');
     text(c, sim.phase === 'won'
       ? `3 waves repelled · ${sim.kills} kills`
-      : 'Outer systems shut down. Rebuild.', 320, 178, P.text, 7, 'center');
+      : `Outer systems shut down · ${sim.leaks} leaks`, 320, 178, P.text, 7, 'center');
+    const restartButton: Button = { x: 278, y: 194, w: 84, h: 18, id: 'restart' };
+    button(c, restartButton, 'NEW RUN');
+    buttons.push(restartButton);
   }
 }
 
@@ -231,6 +274,8 @@ canvas.addEventListener('click', (e: MouseEvent) => {
   const y = (e.clientY - r.top) * CANVAS_H / r.height;
   const b = hitTest(buttons, x, y);
   if (b) {
+    if (b.id === 'report:continue') { returnReport = null; saveRun(sim); return; }
+    if (b.id === 'restart') { restartRun(); return; }
     if (b.id.startsWith('build:')) {
       const kind = b.id.slice(6) as TowerKind;
       selectedBuild = selectedBuild === kind ? null : kind;
@@ -241,11 +286,14 @@ canvas.addEventListener('click', (e: MouseEvent) => {
   }
   if (sim.phase === 'won' || sim.phase === 'lost') return;
   // Map click: place selected tower, or start wave on the prompt.
-  if (x >= 400 && x < 504 && y > WORLD_Y + WORLD_H) { if (sim.phase === 'build') startWave(sim); return; }
+  if (x >= 400 && x < 504 && y > WORLD_Y + WORLD_H) {
+    if (sim.phase === 'build') { startWave(sim); saveRun(sim); }
+    return;
+  }
   if (selectedBuild && x < WORLD_W && y >= WORLD_Y && y < WORLD_Y + WORLD_H) {
     const { gx, gy } = toWorld(x, y);
     if (validBuildCell(gx, gy) && sim.wood >= TOWERS[selectedBuild].cost) {
-      if (place(sim, selectedBuild, gx, gy)) selectedBuild = null;
+      if (place(sim, selectedBuild, gx, gy)) { selectedBuild = null; saveRun(sim); }
     }
   }
 });
@@ -259,21 +307,36 @@ canvas.addEventListener('mousemove', (e: MouseEvent) => {
 
 // ---- Loop ------------------------------------------------------------------
 let last = performance.now();
+let lastSave = last;
 function loop(now: number): void {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  step(sim, dt);
-  if (sim.phase === 'wave') combatStep(sim, dt, projectiles, bursts);
-  // Kill accounting: corpses removed here are tower kills (leaks flagged separately).
-  const survivors = sim.enemies.filter(e => e.hp > 0);
-  for (const e of sim.enemies) if (e.hp <= 0 && !e.leaked) sim.kills += 1;
-  sim.enemies = survivors;
+  advance(sim, dt, projectiles, bursts);
+  if (now - lastSave >= 1000) { saveRun(sim); lastSave = now; }
   draw();
   requestAnimationFrame(loop);
 }
 
+function restoreRun(): void {
+  const loaded = loadRun(ROUTE);
+  if (!loaded) return;
+  sim = loaded.sim;
+  // A sub-second load is a refresh, not a meaningful return. Avoid noise.
+  if (loaded.elapsedSeconds >= 1 && sim.phase !== 'won' && sim.phase !== 'lost') {
+    returnReport = advance(sim, loaded.elapsedSeconds);
+  }
+  saveRun(sim);
+}
+
+// Persist on lifecycle boundaries; a reload/reopen restores against elapsed wall time.
+window.addEventListener('pagehide', () => saveRun(sim));
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') saveRun(sim);
+});
+
 loadAssets().then(a => {
   assets = a;
+  restoreRun();
   requestAnimationFrame(loop);
 }).catch(err => {
   document.querySelector('.hint')!.textContent = `ASSET ERROR: ${String(err)}`;

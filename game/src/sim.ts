@@ -30,7 +30,7 @@ export interface EnemySpec {
   emberDrain: number;          // Ember lost when it reaches the Watchfire
 }
 
-export const CRAWLER: EnemySpec = { hp: 30, speed: 14, emberDrain: 10 };
+export const CRAWLER: EnemySpec = { hp: 18, speed: 14, emberDrain: 10 };
 
 export interface Enemy {
   x: number; y: number;        // logical px, centre
@@ -65,6 +65,7 @@ export interface Sim {
   phase: 'build' | 'wave' | 'won' | 'lost';
   buildTimer: number;          // seconds until next wave starts
   kills: number;
+  leaks: number;
 }
 
 export function key(gx: number, gy: number): string { return `${gx},${gy}`; }
@@ -74,7 +75,7 @@ export function makeSim(route: Route, startingWood = 100): Sim {
     time: 0, wood: startingWood, ember: 100,
     enemies: [], towers: [], route,
     occupied: new Set(), spawnQueue: 0, spawnTimer: 0,
-    wave: 0, phase: 'build', buildTimer: 8, kills: 0,
+    wave: 0, phase: 'build', buildTimer: 8, kills: 0, leaks: 0,
   };
 }
 
@@ -151,7 +152,7 @@ export function step(sim: Sim, dt: number): void {
     if (e.waypoint >= sim.route.waypoints.length) {
       // Reached the Watchfire: drain Ember.
       sim.ember = Math.max(0, sim.ember - e.spec.emberDrain);
-      e.hp = 0; e.leaked = true; // remove + flag as leak, not a kill
+      e.hp = 0; e.leaked = true; sim.leaks += 1; // remove + flag as leak, not a kill
       if (sim.ember <= 0) { sim.phase = 'lost'; return; }
     }
   }

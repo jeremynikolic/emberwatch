@@ -2,7 +2,7 @@
 // Minimal-effects contract: status reads through silhouette tint and brief
 // directional bursts, never particle clouds.
 
-import type { Sim, Tower } from './sim.js';
+import type { Enemy, Sim, Tower } from './sim.js';
 import { TOWERS } from './sim.js';
 
 export interface Projectile {
@@ -14,6 +14,7 @@ export interface Projectile {
   splashRadius: number;          // 0 = single-target
   slowFactor: number;            // 1 = no slow
   slowDuration: number;
+  target: Enemy;                 // tracks the acquired crawler until impact
   dead: boolean;
 }
 
@@ -55,12 +56,14 @@ export function combatStep(sim: Sim, dt: number, projectiles: Projectile[], burs
       splashRadius: spec.splashRadius ?? 0,
       slowFactor: spec.slowFactor ?? 1,
       slowDuration: spec.slowDuration ?? 0,
+      target,
       dead: false,
     });
   }
 
-  // Projectile flight — locked target point, no homing (readable, deterministic).
+  // Projectile flight tracks its acquired crawler; it cannot retarget mid-flight.
   for (const p of projectiles) {
+    if (p.target.hp > 0 && !p.target.leaked) { p.tx = p.target.x; p.ty = p.target.y; }
     const dx = p.tx - p.x, dy = p.ty - p.y;
     const dist = Math.hypot(dx, dy);
     const stepLen = p.speed * dt;
