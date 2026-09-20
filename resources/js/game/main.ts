@@ -142,8 +142,9 @@ function drawEnemy(c: Ctx, e: Sim['enemies'][number]): void {
 }
 
 function drawTower(c: Ctx, t: Sim['towers'][number]): void {
+  // draw() has already translated the context into world space.
   const img: AssetKey = t.kind === 'bolt' ? 'boltThrower' : t.kind === 'frost' ? 'frostCondenser' : 'bombard';
-  c.drawImage(assets[img], t.gx * T + WORLD_X, t.gy * T + WORLD_Y, 32, 32);
+  c.drawImage(assets[img], t.gx * T, t.gy * T, 32, 32);
 }
 
 function drawProjectiles(c: Ctx): void {
